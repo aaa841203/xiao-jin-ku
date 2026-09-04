@@ -322,6 +322,7 @@ tr.tx-row:hover{background:var(--light-pink);}
     <div class="topbar">
       <h1 id="pageTitle">儀表板</h1>
       <div class="topbar-actions">
+        <button class="icon-btn" id="helpBtn" title="使用說明">❓</button>
         <button class="icon-btn" id="notifBtn" title="開啟到期提醒通知">🔔</button>
         <button class="icon-btn" id="backupBtnTop" title="設定與備份">⚙️</button>
         <button class="btn-add" id="addTxBtn">
@@ -418,7 +419,7 @@ function defaultDB(){
     monthlyBudgets: {},
     cash: { base: 0, goal: 10000 },
     settings: { appName: '小金庫✨', theme: 'red' },
-    meta: { createdAt: new Date().toISOString() }
+    meta: { createdAt: new Date().toISOString(), hasSeenIntro: false }
   };
 }
 function migrate(data){
@@ -439,6 +440,8 @@ function migrate(data){
   if(!data.settings) data.settings = {appName:'小金庫✨', theme:'red'};
   if(!data.settings.appName) data.settings.appName = '小金庫✨';
   if(!data.settings.theme) data.settings.theme = 'red';
+  if(!data.meta) data.meta = {createdAt: new Date().toISOString(), hasSeenIntro:false};
+  if(data.meta.hasSeenIntro==null) data.meta.hasSeenIntro = false;
   return data;
 }
 function appName(){ return (db.settings && db.settings.appName) || '妙帳'; }
@@ -1945,6 +1948,33 @@ function openTxModal(id){
   });
 }
 
+/* ---------------- Intro guide ---------------- */
+function openIntroModal(){
+  db.meta.hasSeenIntro = true;
+  saveDB();
+  openModal(`
+    <div class="modal-head"><h2>👋 歡迎使用 ${esc(appName())}</h2><button class="icon-btn" id="mClose">${ICON.close}</button></div>
+    <p style="font-size:13.5px; color:var(--medium); line-height:1.7; margin-bottom:14px;">這是一個記帳與資產總覽的小工具，幫你把收支、預算、信用卡、貸款、存錢計畫都放在同一個地方看。</p>
+    <div style="margin-bottom:14px;">
+      <div style="font-size:13px; font-weight:700; margin-bottom:6px;">左邊選單可以做這些事：</div>
+      <ul style="font-size:13px; color:var(--medium); line-height:1.9; padding-left:18px; margin:0;">
+        <li>📊 儀表板：看整體收支、資產總覽</li>
+        <li>🧾 每月預算：設定每個月各項目的花費上限</li>
+        <li>📅 固定支出：房租、訂閱這類每月固定要繳的錢</li>
+        <li>🐷 現金：記錄手邊現金的收支</li>
+        <li>💳 信用卡：追蹤刷卡金額跟繳款日</li>
+        <li>🏦 貸款：追蹤貸款還款進度</li>
+        <li>🎯 存錢計畫：設定存錢目標，追蹤進度</li>
+      </ul>
+    </div>
+    <p style="font-size:13px; color:var(--medium); line-height:1.7; margin-bottom:14px;">先按右上角「+ 新增記帳」記第一筆帳看看！</p>
+    <p style="font-size:12px; color:var(--gray); line-height:1.6; margin-bottom:16px;">💡 記得到「設定與備份」（⚙️）裡看看，可以改名字、換喜歡的顏色，也可以匯出備份檔——資料只存在這個瀏覽器裡，換裝置前記得先備份喔。之後想再看一次這份說明，按右上角「❓」就可以了。</p>
+    <button class="btn-primary" id="introStart" style="width:100%;">開始使用</button>
+  `);
+  bindModalClose();
+  document.getElementById('introStart').addEventListener('click', closeModal);
+}
+
 /* ---------------- Backup / Restore ---------------- */
 function openBackupModal(){
   openModal(`
@@ -2016,6 +2046,7 @@ document.getElementById('addTxBtn').addEventListener('click', ()=>openTxModal(nu
 document.getElementById('fabAdd').addEventListener('click', ()=>openTxModal(null));
 document.getElementById('backupBtnSide').addEventListener('click', openBackupModal);
 document.getElementById('backupBtnTop').addEventListener('click', openBackupModal);
+document.getElementById('helpBtn').addEventListener('click', openIntroModal);
 document.getElementById('notifBtn').addEventListener('click', ()=>{
   if(typeof Notification==='undefined'){ toast('這個瀏覽器不支援通知'); return; }
   if(Notification.permission==='granted'){ toast('提醒通知已經開啟囉'); maybeNotify(); }
@@ -2034,6 +2065,7 @@ generateFixedRecurrences();
 buildNav();
 renderDashboard();
 maybeNotify();
+if(!db.meta.hasSeenIntro) openIntroModal();
 </script>
 </body>
 </html>
