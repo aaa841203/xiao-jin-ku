@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 <title>小金庫✨ · 個人記帳與資產總覽</title>
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#C9938A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="小金庫">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -281,7 +288,8 @@ tr.tx-row:hover{background:var(--light-pink);}
   .grid-3{grid-template-columns:1fr;}
   .month-grid{grid-template-columns:repeat(2,1fr);}
   #page-content{padding:16px 14px 112px;}
-  .topbar{padding:14px 16px;}
+  .topbar{padding:14px 16px; justify-content:space-between;}
+  .topbar h1{position:static; transform:none; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:38vw;}
   .app-footer{padding-bottom:104px;}
   .bottom-nav{
     display:flex; position:fixed; bottom:0; left:0; right:0; background:var(--white); border-top:1px solid var(--border);
@@ -396,14 +404,12 @@ const EMOJI_CHOICES = ['🍚','🍜','🍔','☕','🍎','🎮','🎬','📚','�
 
 const NAV_ITEMS = [
   {key:'dashboard', label:'儀表板', emoji:'📊'},
-  {key:'budget',    label:'每月預算', emoji:'🧾'},
-  {key:'fixed',     label:'固定支出', emoji:'📅'},
   {key:'cash',      label:'現金',   emoji:'🐷'},
   {key:'credit',    label:'信用卡', emoji:'💳'},
   {key:'loan',      label:'貸款',   emoji:'🏦'},
   {key:'saving',    label:'存錢計畫', emoji:'🎯'},
 ];
-const REMINDER_NAV_CATS = ['fixed','credit','loan'];
+const REMINDER_NAV_CATS = ['credit','loan'];
 
 /* ---------------- Storage ---------------- */
 const STORAGE_KEY = 'miaoAccountLedger_v1';
@@ -849,8 +855,6 @@ let currentRoute = 'dashboard';
 const renderers = {
   dashboard: renderDashboard,
   list: renderList,
-  budget: renderBudget,
-  fixed: renderFixed,
   cash: renderCash,
   credit: renderCredit,
   loan: renderLoan,
@@ -925,6 +929,8 @@ function renderDashboard(){
   const todayIncome = todayTx.filter(t=>t.type==='income').reduce((a,t)=>a+t.amount,0);
 
   const assets = totalAssets(), liab = totalLiabilities(), net = assets-liab;
+  const cashOnHand = cashBalance();
+  const savingsTotal = db.savingsPlans.reduce((a,p)=>a+savingFigures(p).current,0);
 
   const now = new Date();
   const budget = budgetTotalAmountForMonth(now.getFullYear(), now.getMonth()+1);
@@ -945,18 +951,21 @@ function renderDashboard(){
 
   const recent = db.transactions.slice().sort((a,b)=>dateObjOf(b)-dateObjOf(a)).slice(0,6);
   const reminders = computeReminders();
+  const pendingCount = db.transactions.filter(t=>t.quickAdded).length;
 
   el.innerHTML = `
     ${reminderBannerHTML(reminders)}
+    ${pendingCount>0 ? `<div class="reminder-banner" id="pendingReviewBanner" style="cursor:pointer;">
+      <div class="rb-title">🕒 有 ${pendingCount} 筆快速記帳還沒補分類，點我去整理</div>
+    </div>` : ''}
     <div class="stat-grid">
-      <div class="stat-card" style="--accent:var(--sage)"><div class="stat-label">總資產</div><div class="stat-value pos">${fmtMoney(assets)}</div><div class="stat-sub">現金＋存錢計畫累積</div></div>
+      <div class="stat-card" style="--accent:var(--sage)"><div class="stat-label">現金（可花用）</div><div class="stat-value pos">${fmtMoney(cashOnHand)}</div><div class="stat-sub">存錢計畫 ${fmtMoney(savingsTotal)}（已存起來，不算可花現金）</div></div>
       <div class="stat-card" style="--accent:var(--deep-pink)"><div class="stat-label">負資產</div><div class="stat-value neg">${fmtMoney(liab)}</div><div class="stat-sub">信用卡欠款＋貸款餘額</div></div>
       <div class="stat-card" style="--accent:var(--blue)"><div class="stat-label">淨資產</div><div class="stat-value ${net>=0?'pos':'neg'}">${fmtMoney(net)}</div><div class="stat-sub">資產減去負債</div></div>
       <div class="stat-card" style="--accent:var(--pink)"><div class="stat-label">今日花費</div><div class="stat-value neg">${fmtMoney(todayExpense)}</div><div class="stat-sub">今日收入 ${fmtMoney(todayIncome)}</div></div>
     </div>
 
-    <div class="two-col">
-      <div class="card">
+    <div class="card" style="margin-bottom:20px;">
         ${renderPeriodBar('dashboard')}
         <div class="section-title">收支分析<span class="hint">先看收支結餘，下方是支出明細（依支付方式｜僅計固定支出／現金／信用卡）</span></div>
         <div style="margin-bottom:16px; font-size:13px;">${periodNet>=0 ? `<span class="badge-ok">收支結餘 +${fmtMoney(periodNet)}</span>` : `<span class="badge-over">收支結餘 ${fmtMoney(periodNet)}，這段期間花得比賺得多</span>`}</div>
@@ -998,38 +1007,83 @@ function renderDashboard(){
         </div>
       </div>
 
-      <div class="card">
-        <div class="section-title">本月預算</div>
-        <div style="font-size:12.5px; color:var(--gray); margin-bottom:6px;">${now.getFullYear()} 年 ${now.getMonth()+1} 月</div>
-        ${budget>0 ? `
-          <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;">
-            <span>已花費 <b>${fmtMoney(spentThisMonth)}</b></span>
-            <span style="color:var(--gray)">預算 ${fmtMoney(budget)}</span>
-          </div>
-          <div class="progress ${spentThisMonth>budget?'over':''}"><div style="width:${budgetPct}%"></div></div>
-          <div style="margin-top:10px; font-size:13px;">${budgetLeft>=0 ? `<span class="badge-ok">還可以花 ${fmtMoney(budgetLeft)}</span>` : `<span class="badge-over">已超支 ${fmtMoney(-budgetLeft)}</span>`}</div>
-        ` : `<div class="empty-state" style="padding:20px 10px;"><div class="es-emoji">🧾</div><p>還沒設定預算項目，去「每月預算」頁面新增吧</p></div>`}
-      </div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="section-title">預算項目<span class="hint"><button class="btn-sm" id="addBudgetItem">+ 新增項目</button></span></div>
+      <div id="dashBudgetWrap"></div>
     </div>
 
-    <div class="card">
-      <div class="section-title">明細</div>
-      ${renderPeriodBar('list')}
-      <div class="filter-row">
-        <div class="search-box">${ICON.search}<input type="text" id="lf-keyword" placeholder="搜尋品項或備註" value="${esc(listFilters.keyword)}"></div>
-        <select id="lf-category"><option value="">所有分類</option>${CATEGORIES.map(c=>`<option value="${c.key}" ${listFilters.category===c.key?'selected':''}>${c.emoji} ${c.label}</option>`).join('')}</select>
-        <select id="lf-type"><option value="">收支不拘</option><option value="expense" ${listFilters.type==='expense'?'selected':''}>支出</option><option value="income" ${listFilters.type==='income'?'selected':''}>收入</option></select>
-        <select id="lf-payment"><option value="">所有支付方式</option>${PAYMENTS.map(p=>`<option value="${p}" ${listFilters.payment===p?'selected':''}>${p}</option>`).join('')}</select>
-      </div>
-      <div id="listTableArea"></div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="section-title">固定支出<span class="hint"><button class="btn-sm" id="addFixed">+ 新增項目</button></span></div>
+      <div id="dashFixedWrap"></div>
     </div>
+
   `;
   bindPeriodBar(el, renderDashboard);
-  renderListTable();
-  el.querySelector('#lf-keyword').addEventListener('input', e=>{ listFilters.keyword=e.target.value; renderListTable(); });
-  el.querySelector('#lf-category').addEventListener('change', e=>{ listFilters.category=e.target.value; renderListTable(); });
-  el.querySelector('#lf-type').addEventListener('change', e=>{ listFilters.type=e.target.value; renderListTable(); });
-  el.querySelector('#lf-payment').addEventListener('change', e=>{ listFilters.payment=e.target.value; renderListTable(); });
+  el.querySelector('#pendingReviewBanner')?.addEventListener('click', ()=>goTo('cash'));
+
+  renderDashBudgetList();
+  renderDashFixedList();
+  el.querySelector('#addBudgetItem').addEventListener('click', ()=>openBudgetItemModal(null));
+  el.querySelector('#addFixed').addEventListener('click', ()=>openFixedModal(null));
+}
+
+function renderDashBudgetList(){
+  const wrap = document.getElementById('dashBudgetWrap');
+  if(!wrap) return;
+  const now = new Date();
+  if(!db.budgetItems.length){
+    wrap.innerHTML = `<div class="empty-state" style="padding:20px 10px;"><div class="es-emoji">🍱</div><p>還沒有預算項目，試試新增「餐飲」「娛樂」「交通」等</p></div>`;
+    return;
+  }
+  wrap.innerHTML = `<div class="row-list" style="margin-bottom:0;">` + db.budgetItems.map(item=>{
+    const actual = budgetItemActual(item.id, now.getFullYear(), now.getMonth()+1);
+    const monthAmount = budgetItemAmountForMonth(item, now.getFullYear(), now.getMonth()+1);
+    const over = actual>monthAmount;
+    const ip = monthAmount>0 ? Math.min(100, Math.round(actual/monthAmount*100)) : 0;
+    return `<div class="list-row" style="cursor:default;">
+      <span class="lr-emoji">${item.emoji||'🧾'}</span>
+      <span class="lr-name">${esc(item.name)}</span>
+      <div class="progress ${over?'over':''}" style="width:80px; flex-shrink:0;"><div style="width:${ip}%"></div></div>
+      <span class="lr-total" style="white-space:nowrap;">${fmtNum(actual)} / ${fmtNum(monthAmount)}</span>
+      <div class="row-actions" style="flex-shrink:0;">
+        <button class="mini-btn bg-edit" data-id="${item.id}">${ICON.edit}</button>
+        <button class="mini-btn bg-del" data-id="${item.id}">${ICON.trash}</button>
+      </div>
+    </div>`;
+  }).join('') + `</div>`;
+  wrap.querySelectorAll('.bg-edit').forEach(b=>b.addEventListener('click', ()=>openBudgetItemModal(b.dataset.id)));
+  wrap.querySelectorAll('.bg-del').forEach(b=>b.addEventListener('click', ()=>{
+    if(confirm('確定刪除這個預算項目？（不會刪除已記錄的花費）')){
+      db.budgetItems = db.budgetItems.filter(i=>i.id!==b.dataset.id);
+      saveDB(); toast('已刪除'); rerender();
+    }
+  }));
+}
+
+function renderDashFixedList(){
+  const wrap = document.getElementById('dashFixedWrap');
+  if(!wrap) return;
+  const items = db.fixedExpenses.slice().sort((a,b)=>(a.dueDay||0)-(b.dueDay||0));
+  if(!items.length){
+    wrap.innerHTML = `<div class="empty-state" style="padding:20px 10px;"><div class="es-emoji">📌</div><p>還沒有固定支出項目，例如房租、訂閱服務、保險費</p></div>`;
+    return;
+  }
+  wrap.innerHTML = `<div class="row-list" style="margin-bottom:0;">` + items.map(f=>`<div class="list-row" style="cursor:default;">
+    <span class="lr-emoji">📅</span>
+    <span class="lr-name">${esc(f.item)}</span>
+    <span class="lr-total" style="white-space:nowrap;">${fmtMoney(f.amount)} · 每月${f.dueDay}號</span>
+    <div class="row-actions" style="flex-shrink:0;">
+      <button class="mini-btn fx-edit" data-id="${f.id}">${ICON.edit}</button>
+      <button class="mini-btn fx-del" data-id="${f.id}">${ICON.trash}</button>
+    </div>
+  </div>`).join('') + `</div>`;
+  wrap.querySelectorAll('.fx-edit').forEach(b=>b.addEventListener('click', ()=>openFixedModal(b.dataset.id)));
+  wrap.querySelectorAll('.fx-del').forEach(b=>b.addEventListener('click', ()=>{
+    if(confirm('確定刪除這個固定支出項目？（不會刪除已記錄的花費）')){
+      db.fixedExpenses = db.fixedExpenses.filter(f=>f.id!==b.dataset.id);
+      saveDB(); toast('已刪除'); rerender();
+    }
+  }));
 }
 
 function txRowHTML(t, tagOverride){
@@ -1039,7 +1093,7 @@ function txRowHTML(t, tagOverride){
   const tagColor = tagOverride && tagOverride.color ? tagOverride.color : cat.color;
   return `<tr class="tx-row" data-id="${t.id}">
     <td><span class="tag" style="background:${tagColor}22; color:${tagColor}"><span>${tagEmoji}</span>${esc(tagLabel)}</span></td>
-    <td><div style="font-weight:600;">${esc(t.item)}</div><div style="font-size:11.5px; color:var(--gray);">${t.date} · ${t.payment}${t.note?(' · '+esc(t.note)):''}</div></td>
+    <td><div style="font-weight:600;">${esc(t.item)}${t.quickAdded?' <span style="font-size:10px; font-weight:700; color:var(--deep-pink); background:var(--light-pink); padding:2px 7px; border-radius:999px; vertical-align:middle;">待分類</span>':''}</div><div style="font-size:11.5px; color:var(--gray);">${t.date} · ${t.payment}${t.note?(' · '+esc(t.note)):''}</div></td>
     <td style="text-align:right;"><span class="amt ${t.type}">${t.type==='income'?'+':'-'}${fmtNum(t.amount)}</span></td>
     <td style="width:76px;"><div class="row-actions">
       <button class="mini-btn tx-edit" data-id="${t.id}" title="編輯">${ICON.edit}</button>
@@ -1092,7 +1146,7 @@ function renderListTable(){
   txs.sort((a,b)=>dateObjOf(b)-dateObjOf(a));
 
   area.innerHTML = periodSummaryHTML(txs) +
-    (txs.length? `<div class="table-wrap"><table><tbody>${txs.map(txRowHTML).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">🔍</div><p>沒有符合條件的紀錄</p></div>`);
+    (txs.length? `<div class="table-wrap"><table><tbody>${txs.map(t=>txRowHTML(t)).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">🔍</div><p>沒有符合條件的紀錄</p></div>`);
   bindTxRowEvents(area);
 }
 
@@ -1200,7 +1254,7 @@ function openBudgetItemModal(id){
         saveDB();
         document.getElementById('bi-mo-list').innerHTML = monthOverrideRowsHTML();
         bindMoListEvents();
-        renderBudget();
+        rerender();
       }));
     }
     bindMoListEvents();
@@ -1215,7 +1269,7 @@ function openBudgetItemModal(id){
       document.getElementById('bi-mo-list').innerHTML = monthOverrideRowsHTML();
       bindMoListEvents();
       document.getElementById('bi-mo-amount').value = '';
-      toast('已設定'); renderBudget();
+      toast('已設定'); rerender();
     });
   }
   document.getElementById('bi-save').addEventListener('click', ()=>{
@@ -1229,7 +1283,7 @@ function openBudgetItemModal(id){
     };
     if(id) db.budgetItems = db.budgetItems.map(i=>i.id===id?val:i);
     else db.budgetItems.push(val);
-    saveDB(); closeModal(); toast('已儲存'); renderBudget();
+    saveDB(); closeModal(); toast('已儲存'); rerender();
   });
 }
 
@@ -1281,7 +1335,7 @@ function renderFixedTx(){
   if(!area) return;
   let txs = filterByPeriod(db.transactions.filter(t=>t.category==='fixed'), periodStates.fixed);
   txs.sort((a,b)=>dateObjOf(b)-dateObjOf(a));
-  area.innerHTML = periodSummaryHTML(txs) + (txs.length ? `<div class="table-wrap"><table><tbody>${txs.map(txRowHTML).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">📭</div><p>這個期間沒有相關記帳紀錄</p></div>`);
+  area.innerHTML = periodSummaryHTML(txs) + (txs.length ? `<div class="table-wrap"><table><tbody>${txs.map(t=>txRowHTML(t)).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">📭</div><p>這個期間沒有相關記帳紀錄</p></div>`);
   bindTxRowEvents(area);
 }
 function openFixedModal(id){
@@ -1324,6 +1378,12 @@ function renderCash(){
   const goal = db.cash.goal || 10000;
   const pct = goal>0 ? Math.min(100, Math.round(Math.max(0,bal)/goal*100)) : 0;
   el.innerHTML = `
+    <div class="card" style="margin-bottom:18px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <div style="font-size:13px; font-weight:700; flex-shrink:0; white-space:nowrap;">⚡ 快速記一筆</div>
+      <input type="number" id="quickAmt" placeholder="金額" inputmode="decimal" style="flex:1; min-width:90px; border:1px solid var(--border); border-radius:10px; padding:9px 12px; font-size:14px; background:var(--cream);">
+      <input type="text" id="quickItem" placeholder="買了什麼（選填）" style="flex:2; min-width:120px; border:1px solid var(--border); border-radius:10px; padding:9px 12px; font-size:14px; background:var(--cream);">
+      <button class="btn-sm" id="quickAddBtn" style="flex-shrink:0;">記一筆</button>
+    </div>
     <div class="card" style="margin-bottom:18px;">
       <div class="section-title">身上現金<span class="hint"><button class="btn-sm" id="adjCash">調整餘額／目標</button></span></div>
       <div class="piggy-wrap">
@@ -1350,6 +1410,25 @@ function renderCash(){
   el.querySelector('#cash-lf-payment').addEventListener('change', e=>{ cashFilters.payment=e.target.value; renderCashTx(); });
   bindPeriodBar(el, renderCash);
   renderCashTx();
+
+  function doQuickAdd(){
+    const amtInput = el.querySelector('#quickAmt');
+    const itemInput = el.querySelector('#quickItem');
+    const amt = parseFloat(amtInput.value);
+    if(!amt || amt<=0){ toast('請輸入金額'); amtInput.focus(); return; }
+    const itemVal = itemInput.value.trim() || '快速記帳';
+    db.transactions.push({
+      id: uid(), date: todayStr(), time: nowTimeStr(), category:'cash', item: itemVal,
+      amount: amt, type:'expense', payment:'現金', note:'', photo:null, linkId:'', budgetLinkId:'',
+      quickAdded: true
+    });
+    saveDB();
+    toast('已記錄！有空再回來補分類細節');
+    renderCash();
+  }
+  el.querySelector('#quickAddBtn').addEventListener('click', doQuickAdd);
+  el.querySelector('#quickAmt').addEventListener('keydown', e=>{ if(e.key==='Enter') doQuickAdd(); });
+  el.querySelector('#quickItem').addEventListener('keydown', e=>{ if(e.key==='Enter') doQuickAdd(); });
 }
 function renderCashTx(){
   const area = document.getElementById('cashTxArea');
@@ -1357,7 +1436,7 @@ function renderCashTx(){
   let txs = filterByPeriod(db.transactions.filter(t=>t.category==='cash'), periodStates.cash);
   if(cashFilters.payment) txs = txs.filter(t=>t.payment===cashFilters.payment);
   txs.sort((a,b)=>dateObjOf(b)-dateObjOf(a));
-  area.innerHTML = periodSummaryHTML(txs) + (txs.length ? `<div class="table-wrap"><table><tbody>${txs.map(txRowHTML).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">🐷</div><p>這個期間沒有符合條件的現金紀錄</p></div>`);
+  area.innerHTML = periodSummaryHTML(txs) + (txs.length ? `<div class="table-wrap"><table><tbody>${txs.map(t=>txRowHTML(t)).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">🐷</div><p>這個期間沒有符合條件的現金紀錄</p></div>`);
   bindTxRowEvents(area);
 }
 function openCashAdjustModal(){
@@ -1515,7 +1594,7 @@ function renderLoanTx(){
   if(!area) return;
   let txs = filterByPeriod(db.transactions.filter(t=>t.category==='loan'), periodStates.loan);
   txs.sort((a,b)=>dateObjOf(b)-dateObjOf(a));
-  area.innerHTML = periodSummaryHTML(txs) + (txs.length ? `<div class="table-wrap"><table><tbody>${txs.map(txRowHTML).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">🏦</div><p>這個期間沒有相關紀錄</p></div>`);
+  area.innerHTML = periodSummaryHTML(txs) + (txs.length ? `<div class="table-wrap"><table><tbody>${txs.map(t=>txRowHTML(t)).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">🏦</div><p>這個期間沒有相關紀錄</p></div>`);
   bindTxRowEvents(area);
 }
 function openLoanDetailModal(id){
@@ -1715,7 +1794,7 @@ function renderSavingTx(){
   if(!area) return;
   let txs = filterByPeriod(db.transactions.filter(t=>t.category==='saving'), periodStates.saving);
   txs.sort((a,b)=>dateObjOf(b)-dateObjOf(a));
-  area.innerHTML = periodSummaryHTML(txs) + (txs.length ? `<div class="table-wrap"><table><tbody>${txs.map(txRowHTML).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">🎯</div><p>這個期間沒有相關紀錄</p></div>`);
+  area.innerHTML = periodSummaryHTML(txs) + (txs.length ? `<div class="table-wrap"><table><tbody>${txs.map(t=>txRowHTML(t)).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">🎯</div><p>這個期間沒有相關紀錄</p></div>`);
   bindTxRowEvents(area);
 }
 function openSavingChartModal(id){
@@ -1792,7 +1871,7 @@ document.getElementById('modalOverlay').addEventListener('click', e=>{
 /* ---------------- Transaction Add/Edit modal ---------------- */
 function openTxModal(id){
   const item = id ? db.transactions.find(t=>t.id===id) : {
-    date: todayStr(), category:'budget', item:'', amount:'',
+    date: todayStr(), category:'cash', item:'', amount:'',
     type:'expense', payment:'現金', note:'', linkId:'', budgetLinkId:''
   };
 
@@ -1941,6 +2020,7 @@ function openTxModal(id){
       note: document.getElementById('tx-note').value.trim(),
       linkId: linkSel ? linkSel.value : '',
       budgetLinkId: budgetLinkSel ? budgetLinkSel.value : '',
+      quickAdded: false,
     };
     if(id) db.transactions = db.transactions.map(t=>t.id===id?val:t);
     else db.transactions.push(val);
