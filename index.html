@@ -368,14 +368,21 @@ const ICON = {
 
 /* ---------------- Categories & constants ---------------- */
 const CATEGORIES = [
-  {key:'budget',  label:'每月預算', color:'#7A9BAD', emoji:'🧾'},
-  {key:'fixed',   label:'固定支出', color:'#C9938A', emoji:'📅'},
-  {key:'cash',    label:'現金',    color:'#9AAE9B', emoji:'🐷'},
-  {key:'credit',  label:'信用卡',  color:'#A97468', emoji:'💳'},
-  {key:'loan',    label:'貸款',    color:'#5F7E90', emoji:'🏦'},
-  {key:'saving',  label:'存錢計畫', color:'#748F76', emoji:'🎯'},
+  {key:'daily',    label:'日常生活', color:'#C9938A', emoji:'🍚'},
+  {key:'fixed',    label:'固定支出', color:'#7A9BAD', emoji:'🏠'},
+  {key:'shopping', label:'購物娛樂', color:'#A97468', emoji:'🛍️'},
+  {key:'family',   label:'家庭支出', color:'#9AAE9B', emoji:'👪'},
+  {key:'saving',   label:'儲蓄投資', color:'#748F76', emoji:'💰'},
+  {key:'loan',     label:'貸款債務', color:'#5F7E90', emoji:'🏦'},
 ];
-const CAT_MAP = Object.fromEntries(CATEGORIES.map(c=>[c.key,c]));
+const INCOME_CATEGORIES = [
+  {key:'salary',       label:'薪資',   color:'#9AAE9B', emoji:'💼'},
+  {key:'bonus',        label:'獎金',   color:'#C9938A', emoji:'🎁'},
+  {key:'sidejob',      label:'副業',   color:'#7A9BAD', emoji:'💻'},
+  {key:'invest',       label:'投資收益', color:'#748F76', emoji:'📈'},
+  {key:'other_income', label:'其他收入', color:'#9B9A97', emoji:'🎯'},
+];
+const CAT_MAP = Object.fromEntries([...CATEGORIES, ...INCOME_CATEGORIES].map(c=>[c.key,c]));
 const THEMES = {
   red:    {label:'紅', swatch:'#C9938A', pink:'#C9938A', softPink:'#E8C4BC', lightPink:'#F5E6E3', deepPink:'#A97468'},
   yellow: {label:'黃', swatch:'#C9A66A', pink:'#C9A66A', softPink:'#E3CFA0', lightPink:'#F6EEDD', deepPink:'#A9803F'},
@@ -448,6 +455,19 @@ function migrate(data){
   if(!data.settings.theme) data.settings.theme = 'red';
   if(!data.meta) data.meta = {createdAt: new Date().toISOString(), hasSeenIntro:false};
   if(data.meta.hasSeenIntro==null) data.meta.hasSeenIntro = false;
+  data.transactions = (data.transactions||[]).map(t=>{
+    if(t.category==='credit'){
+      return Object.assign({}, t, {category:'daily', cardLinkId: t.cardLinkId || t.linkId || '', linkId:''});
+    }
+    if(t.category==='budget'){
+      return Object.assign({}, t, {category:'daily', budgetLinkId: t.budgetLinkId || t.linkId || '', linkId:'', cardLinkId: t.cardLinkId||''});
+    }
+    if(t.category==='cash'){
+      return Object.assign({cardLinkId:''}, t, {category:'daily'});
+    }
+    if(t.cardLinkId==null) t.cardLinkId = '';
+    return t;
+  });
   return data;
 }
 function appName(){ return (db.settings && db.settings.appName) || '妙帳'; }
@@ -657,14 +677,14 @@ function periodSummaryHTML(txs){
 function cashBalance(){
   let bal = db.cash.base||0;
   db.transactions.forEach(t=>{
-    if(t.category==='cash'){ bal += t.type==='income' ? t.amount : -t.amount; }
+    if((t.payment==='現金' || t.payment==='轉帳') && t.category!=='saving' && !t.cardLinkId){ bal += t.type==='income' ? t.amount : -t.amount; }
   });
   return bal;
 }
 function cardFigures(card){
   let spent=0, paid=0;
   db.transactions.forEach(t=>{
-    if(t.category==='credit' && t.linkId===card.id){
+    if(t.cardLinkId===card.id){
       if(t.type==='expense') spent += t.amount; else paid += t.amount;
     }
   });
@@ -741,8 +761,7 @@ function budgetItemActual(itemId, year, month){
     if(t.type!=='expense') return;
     const d = dateObjOf(t);
     if(d<s || d>e) return;
-    if(t.category==='budget' && t.linkId===itemId) sum += t.amount;
-    else if((t.category==='cash'||t.category==='credit') && t.budgetLinkId===itemId) sum += t.amount;
+    if(t.budgetLinkId===itemId) sum += t.amount;
   });
   return sum;
 }
@@ -754,8 +773,7 @@ function budgetTotalActual(year, month){
     if(t.type!=='expense') return;
     const d = dateObjOf(t);
     if(d<s || d>e) return;
-    if(t.category==='budget') sum += t.amount;
-    else if((t.category==='cash'||t.category==='credit') && t.budgetLinkId) sum += t.amount;
+    if(t.budgetLinkId) sum += t.amount;
   });
   return sum;
 }
@@ -938,13 +956,13 @@ function renderDashboard(){
   const budgetLeft = budget - spentThisMonth;
   const budgetPct = budget>0 ? Math.min(100, Math.round(spentThisMonth/budget*100)) : 0;
 
-  const DASHBOARD_CAT_KEYS = ['fixed','cash','credit'];
-  const scopedExpenseTx = expenseTx.filter(t=>DASHBOARD_CAT_KEYS.includes(t.category));
+  const DASHBOARD_EXPENSE_CAT_KEYS = ['daily','fixed','shopping','family'];
+  const scopedExpenseTx = expenseTx.filter(t=>DASHBOARD_EXPENSE_CAT_KEYS.includes(t.category));
   const byPay = PAYMENTS.map(p=>({label:p, color:EXPENSE_PAY_COLORS[p], value:scopedExpenseTx.filter(t=>t.payment===p).reduce((a,t)=>a+t.amount,0)})).filter(x=>x.value>0);
   const payTotal = byPay.reduce((a,s)=>a+s.value,0);
   const chartPay = donutSVG([{segments:byPay, radius:60, strokeWidth:22}], 140);
 
-  const scopedIncomeTx = incomeTx.filter(t=>DASHBOARD_CAT_KEYS.includes(t.category));
+  const scopedIncomeTx = incomeTx;
   const byPayIncome = PAYMENTS.map(p=>({label:p, color:INCOME_PAY_COLORS[p], value:scopedIncomeTx.filter(t=>t.payment===p).reduce((a,t)=>a+t.amount,0)})).filter(x=>x.value>0);
   const payIncomeTotal = byPayIncome.reduce((a,s)=>a+s.value,0);
   const chartPayIncome = donutSVG([{segments:byPayIncome, radius:60, strokeWidth:22}], 140);
@@ -1418,8 +1436,8 @@ function renderCash(){
     if(!amt || amt<=0){ toast('請輸入金額'); amtInput.focus(); return; }
     const itemVal = itemInput.value.trim() || '快速記帳';
     db.transactions.push({
-      id: uid(), date: todayStr(), time: nowTimeStr(), category:'cash', item: itemVal,
-      amount: amt, type:'expense', payment:'現金', note:'', photo:null, linkId:'', budgetLinkId:'',
+      id: uid(), date: todayStr(), time: nowTimeStr(), category:'daily', item: itemVal,
+      amount: amt, type:'expense', payment:'現金', note:'', photo:null, linkId:'', budgetLinkId:'', cardLinkId:'',
       quickAdded: true
     });
     saveDB();
@@ -1433,7 +1451,7 @@ function renderCash(){
 function renderCashTx(){
   const area = document.getElementById('cashTxArea');
   if(!area) return;
-  let txs = filterByPeriod(db.transactions.filter(t=>t.category==='cash'), periodStates.cash);
+  let txs = filterByPeriod(db.transactions.filter(t=>(t.payment==='現金'||t.payment==='轉帳') && t.category!=='saving' && !t.cardLinkId), periodStates.cash);
   if(cashFilters.payment) txs = txs.filter(t=>t.payment===cashFilters.payment);
   txs.sort((a,b)=>dateObjOf(b)-dateObjOf(a));
   area.innerHTML = periodSummaryHTML(txs) + (txs.length ? `<div class="table-wrap"><table><tbody>${txs.map(t=>txRowHTML(t)).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">🐷</div><p>這個期間沒有符合條件的現金紀錄</p></div>`);
@@ -1511,10 +1529,10 @@ function renderCredit(){
 function renderCreditTx(){
   const area = document.getElementById('creditTxArea');
   if(!area) return;
-  let txs = filterByPeriod(db.transactions.filter(t=>t.category==='credit'), periodStates.credit);
+  let txs = filterByPeriod(db.transactions.filter(t=>t.cardLinkId), periodStates.credit);
   txs.sort((a,b)=>dateObjOf(b)-dateObjOf(a));
   area.innerHTML = periodSummaryHTML(txs) + (txs.length ? `<div class="table-wrap"><table><tbody>${txs.map(t=>{
-    const card = db.creditCards.find(c=>c.id===t.linkId);
+    const card = db.creditCards.find(c=>c.id===t.cardLinkId);
     return txRowHTML(t, card ? {label:card.bank, emoji:'💳'} : null);
   }).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="es-emoji">💳</div><p>這個期間沒有相關紀錄</p></div>`);
   bindTxRowEvents(area);
@@ -1871,8 +1889,8 @@ document.getElementById('modalOverlay').addEventListener('click', e=>{
 /* ---------------- Transaction Add/Edit modal ---------------- */
 function openTxModal(id){
   const item = id ? db.transactions.find(t=>t.id===id) : {
-    date: todayStr(), category:'cash', item:'', amount:'',
-    type:'expense', payment:'現金', note:'', linkId:'', budgetLinkId:''
+    date: todayStr(), category:'daily', item:'', amount:'',
+    type:'expense', payment:'現金', note:'', linkId:'', budgetLinkId:'', cardLinkId:''
   };
 
   openModal(`
@@ -1887,14 +1905,13 @@ function openTxModal(id){
     </div>
 
     <div class="field">
-      <label>六大分類</label>
-      <div class="cat-grid" id="tx-cat-grid">
-        ${CATEGORIES.map(c=>`<button type="button" class="cat-chip ${item.category===c.key?'active':''}" data-cat="${c.key}" style="${item.category===c.key?`background:${c.color}`:''}"><span class="cc-emoji">${c.emoji}</span>${c.label}</button>`).join('')}
-      </div>
+      <label>這筆錢的用途</label>
+      <div class="cat-grid" id="tx-cat-grid"></div>
     </div>
 
     <div class="field" id="tx-link-field" style="display:none;"></div>
     <div class="field" id="tx-budget-link-field" style="display:none;"></div>
+    <div class="field" id="tx-card-link-field" style="display:none;"></div>
 
     <div class="field" id="tx-item-field"><label>品項</label><input type="text" id="tx-item" value="${esc(item.item)}" placeholder="例如：午餐、薪水、租金"></div>
 
@@ -1915,14 +1932,28 @@ function openTxModal(id){
   `);
   bindModalClose();
 
-  let curType = item.type, curCat = item.category, curLink = item.linkId||'', curBudgetLink = item.budgetLinkId||'', curPayment = item.payment||'現金';
+  let curType = item.type, curCat = item.category, curLink = item.linkId||'', curBudgetLink = item.budgetLinkId||'', curCardLink = item.cardLinkId||'', curPayment = item.payment||'現金';
+
+  function catListForType(){ return curType==='income' ? INCOME_CATEGORIES : CATEGORIES; }
+
+  function renderCatGrid(){
+    const grid = document.getElementById('tx-cat-grid');
+    grid.innerHTML = catListForType().map(c=>`<button type="button" class="cat-chip ${curCat===c.key?'active':''}" data-cat="${c.key}" style="${curCat===c.key?`background:${c.color}`:''}"><span class="cc-emoji">${c.emoji}</span>${c.label}</button>`).join('');
+    grid.querySelectorAll('.cat-chip').forEach(chip=>{
+      chip.addEventListener('click', ()=>{
+        curCat = chip.dataset.cat; curLink=''; curBudgetLink=''; curCardLink=''; curPayment = curCat==='saving' ? '' : '現金';
+        grid.querySelectorAll('.cat-chip').forEach(c=>{c.classList.remove('active'); c.style.background='';});
+        chip.classList.add('active'); chip.style.background = CAT_MAP[curCat].color;
+        refreshLinkField();
+        refreshBudgetLinkField();
+        refreshItemAndPaymentField();
+      });
+    });
+  }
 
   function refreshLinkField(){
     const wrap = document.getElementById('tx-link-field');
-    if(curCat==='credit'){
-      wrap.style.display='';
-      wrap.innerHTML = `<label>選擇信用卡</label><select id="tx-link">${db.creditCards.length? db.creditCards.map(c=>`<option value="${c.id}" ${curLink===c.id?'selected':''}>${esc(c.bank)}</option>`).join('') : '<option value="">請先到「信用卡」頁面新增卡片</option>'}</select>`;
-    } else if(curCat==='loan'){
+    if(curCat==='loan'){
       wrap.style.display='';
       wrap.innerHTML = `<label>選擇貸款</label><select id="tx-link">${db.loans.length? db.loans.map(l=>`<option value="${l.id}" ${curLink===l.id?'selected':''}>${esc(l.name)}</option>`).join('') : '<option value="">請先到「貸款」頁面新增項目</option>'}</select>`;
     } else if(curCat==='saving'){
@@ -1935,9 +1966,6 @@ function openTxModal(id){
         const f = db.fixedExpenses.find(x=>x.id===e.target.value);
         if(f){ document.getElementById('tx-item').value = f.item; document.getElementById('tx-amount').value = f.amount; }
       });
-    } else if(curCat==='budget'){
-      wrap.style.display='';
-      wrap.innerHTML = `<label>預算項目（選填，例如吃飯／娛樂）</label><select id="tx-link"><option value="">未分類</option>${db.budgetItems.map(i=>`<option value="${i.id}" ${curLink===i.id?'selected':''}>${i.emoji||''} ${esc(i.name)}</option>`).join('')}</select>`;
     } else {
       wrap.style.display='none'; wrap.innerHTML='';
     }
@@ -1945,9 +1973,20 @@ function openTxModal(id){
 
   function refreshBudgetLinkField(){
     const wrap = document.getElementById('tx-budget-link-field');
-    if((curCat==='cash' || curCat==='credit') && curType==='expense'){
+    if(curType==='expense' && curCat!=='loan' && curCat!=='saving'){
       wrap.style.display='';
       wrap.innerHTML = `<label>歸屬預算項目（選填，例如吃飯／娛樂）</label><select id="tx-budget-link"><option value="">不歸類</option>${db.budgetItems.map(i=>`<option value="${i.id}" ${curBudgetLink===i.id?'selected':''}>${i.emoji||''} ${esc(i.name)}</option>`).join('')}</select>`;
+    } else {
+      wrap.style.display='none'; wrap.innerHTML='';
+    }
+  }
+
+  function refreshCardLinkField(){
+    const wrap = document.getElementById('tx-card-link-field');
+    const payVal = document.getElementById('tx-payment')?.value;
+    if(payVal==='信用卡' && curCat!=='saving'){
+      wrap.style.display='';
+      wrap.innerHTML = `<label>哪一張卡</label><select id="tx-card-link">${db.creditCards.length? db.creditCards.map(c=>`<option value="${c.id}" ${curCardLink===c.id?'selected':''}>${esc(c.bank)}</option>`).join('') : '<option value="">請先到「信用卡」頁面新增卡片</option>'}</select>`;
     } else {
       wrap.style.display='none'; wrap.innerHTML='';
     }
@@ -1963,8 +2002,11 @@ function openTxModal(id){
       itemField.style.display='';
       payWrap.innerHTML = `<label>支付方式</label><select id="tx-payment">${PAYMENTS.map(p=>`<option value="${p}" ${curPayment===p?'selected':''}>${p}</option>`).join('')}</select>`;
     }
+    document.getElementById('tx-payment')?.addEventListener('change', refreshCardLinkField);
+    refreshCardLinkField();
   }
 
+  renderCatGrid();
   refreshLinkField();
   refreshBudgetLinkField();
   refreshItemAndPaymentField();
@@ -1974,14 +2016,9 @@ function openTxModal(id){
       curType = chip.dataset.type;
       document.querySelectorAll('#modalBody .chip[data-type]').forEach(c=>{c.classList.remove('active','income-active');});
       chip.classList.add('active'); if(curType==='income') chip.classList.add('income-active');
-      refreshBudgetLinkField();
-    });
-  });
-  document.querySelectorAll('#tx-cat-grid .cat-chip').forEach(chip=>{
-    chip.addEventListener('click', ()=>{
-      curCat = chip.dataset.cat; curLink=''; curBudgetLink=''; curPayment = curCat==='saving' ? '' : '現金';
-      document.querySelectorAll('#tx-cat-grid .cat-chip').forEach(c=>{c.classList.remove('active'); c.style.background='';});
-      chip.classList.add('active'); chip.style.background = CAT_MAP[curCat].color;
+      const validKeys = catListForType().map(c=>c.key);
+      if(!validKeys.includes(curCat)){ curCat = validKeys[0]; curLink=''; curBudgetLink=''; curCardLink=''; }
+      renderCatGrid();
       refreshLinkField();
       refreshBudgetLinkField();
       refreshItemAndPaymentField();
@@ -1999,6 +2036,7 @@ function openTxModal(id){
     const amount = parseFloat(document.getElementById('tx-amount').value)||0;
     const linkSel = document.getElementById('tx-link');
     const budgetLinkSel = document.getElementById('tx-budget-link');
+    const cardLinkSel = document.getElementById('tx-card-link');
     let itemName = '';
     if(curCat==='saving'){
       const plan = linkSel ? db.savingsPlans.find(p=>p.id===linkSel.value) : null;
@@ -2020,6 +2058,7 @@ function openTxModal(id){
       note: document.getElementById('tx-note').value.trim(),
       linkId: linkSel ? linkSel.value : '',
       budgetLinkId: budgetLinkSel ? budgetLinkSel.value : '',
+      cardLinkId: cardLinkSel ? cardLinkSel.value : '',
       quickAdded: false,
     };
     if(id) db.transactions = db.transactions.map(t=>t.id===id?val:t);
